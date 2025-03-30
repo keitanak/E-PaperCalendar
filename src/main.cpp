@@ -1,67 +1,29 @@
 #include <Arduino.h>
 
-// Display Library example for SPI e-paper panels from Dalian Good Display and boards from Waveshare.
-// Requires HW SPI and Adafruit_GFX. Caution: the e-paper panels require 3.3V supply AND data lines!
-//
-// Display Library based on Demo Example from Good Display: https://www.good-display.com/companyfile/32/
-//
-// Author: Jean-Marc Zingg
-//
-// Version: see library.properties
-//
-// Library: https://github.com/ZinggJM/GxEPD2
-
-// Supporting Arduino Forum Topics (closed, read only):
-// Good Display ePaper for Arduino: https://forum.arduino.cc/t/good-display-epaper-for-arduino/419657
-// Waveshare e-paper displays with SPI: https://forum.arduino.cc/t/waveshare-e-paper-displays-with-spi/467865
-//
-// Add new topics in https://forum.arduino.cc/c/using-arduino/displays/23 for new questions and issues
-
-// see GxEPD2_wiring_examples.h for wiring suggestions and examples
-
-// NOTE for use with Waveshare ESP32 Driver Board:
-// **** also need to select the constructor with the parameters for this board in GxEPD2_display_selection_new_style.h ****
-//
-// The Wavehare ESP32 Driver Board uses uncommon SPI pins for the FPC connector. It uses HSPI pins, but SCK and MOSI are swapped.
-// To use HW SPI with the ESP32 Driver Board, HW SPI pins need be re-mapped in any case. Can be done using either HSPI or VSPI.
-// Other SPI clients can either be connected to the same SPI bus as the e-paper, or to the other HW SPI bus, or through SW SPI.
-// The logical configuration would be to use the e-paper connection on HSPI with re-mapped pins, and use VSPI for other SPI clients.
-// VSPI with standard VSPI pins is used by the global SPI instance of the Arduino IDE ESP32 package.
-
-// uncomment next line to use HSPI for EPD (and e.g VSPI for SD), e.g. with Waveshare ESP32 Driver Board
-//#define USE_HSPI_FOR_EPD
-
-// base class GxEPD2_GFX can be used to pass references or pointers to the display instance as parameter, uses ~1.2k more code
-// enable or disable GxEPD2_GFX base class
-#define ENABLE_GxEPD2_GFX 0
-
-// uncomment next line to use class GFX of library GFX_Root instead of Adafruit_GFX
-//#include <GFX.h>
-// Note: if you use this with ENABLE_GxEPD2_GFX 1:
-//       uncomment it in GxEPD2_GFX.h too, or add #include <GFX.h> before any #include <GxEPD2_GFX.h>
-
-#include <holidays.h>
-
 #include <STM32RTC.h>
 
 #include "STM32LowPower.h"
 
 #include <JJYReceiver.h>
 
-/* Change these values to set the current initial time */
+#include <holidays.h>
+
+/* Change these values to set the initial time after powerloss */
 const byte seconds = 0;
 const byte minutes = 58;
 const byte hours = 23;
 
-/* Change these values to set the current initial date */
-/* Monday 15th June 2015 */
+/* Change these values to set the initial date after powerloss */
+/* Saturday 1st March 2025 */
 // week day: 1-7 (Monday first)
 const byte weekDay = 7;
 const byte day =1;
 const byte month = 3;
 const byte year = 25;
 
-//#define LED_BUILTIN PA8
+// To preserve the current dates. Reset these valuse to default.
+int curyear=0,curmonth=0,curday=0;
+
 
 // define pin for JJY module
 #define DATA PB3
@@ -75,8 +37,6 @@ const byte year = 25;
 // TIMEout for JJY recieve (ms)
 #define JJYTIMEOUT 300000
 
-//#define MONITORPIN LED_BUILTIN
-
 //const int pin = USER_BTN;
 const int pin = PA10;
 const int pin2 = PA12;
@@ -84,9 +44,8 @@ const int pin2 = PA12;
 //For power control of epaper
 #define EPDPWR PA11
 
-  // 10msec Timer for clock ticktock (Mandatory)
-  //MsTimer2::set(10, ticktock);
-  //MsTimer2::start();
+// 10msec Timer for clock ticktock (Mandatory)
+
 
 #if defined(TIM1)
   TIM_TypeDef *Instance = TIM1;
@@ -94,17 +53,29 @@ const int pin2 = PA12;
   TIM_TypeDef *Instance = TIM2;
 #endif
 
-  HardwareTimer *MyTim = new HardwareTimer(Instance);
+HardwareTimer *MyTim = new HardwareTimer(Instance);
 
 JJYReceiver jjy(DATA,SEL,PON); // JJYReceiver lib set up.
 bool jjyreceiving = false;
 unsigned long receievestarttime;
 
 int currentcalmode=0,calmode = 0;
-// 0= single 1 = 9 months.
+// 0= single month,  1 = 9 months calendar.
 
 /* Get the rtc object */
 STM32RTC& rtc = STM32RTC::getInstance();
+
+// uncomment next line to use HSPI for EPD (and e.g VSPI for SD), e.g. with Waveshare ESP32 Driver Board
+//#define USE_HSPI_FOR_EPD
+
+// base class GxEPD2_GFX can be used to pass references or pointers to the display instance as parameter, uses ~1.2k more code
+// enable or disable GxEPD2_GFX base class
+#define ENABLE_GxEPD2_GFX 0
+
+// uncomment next line to use class GFX of library GFX_Root instead of Adafruit_GFX
+//#include <GFX.h>
+// Note: if you use this with ENABLE_GxEPD2_GFX 1:
+//       uncomment it in GxEPD2_GFX.h too, or add #include <GFX.h> before any #include <GxEPD2_GFX.h>
 
 //#include <GxEPD2_BW.h>
 #include <GxEPD2_3C.h>
@@ -239,6 +210,8 @@ SPIClassRP2040 SPIn(spi1, 12, 13, 10, 11); // need be valid pins for same SPI ch
 SPIClass hspi(HSPI);
 #endif
 
+// Change clock speed to default value.
+// This is used before drawing e-paper for optimal performance.
 void SystemClock_Config_org(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {};
@@ -281,6 +254,7 @@ void SystemClock_Config_org(void)
   }
 }
 
+// Change clock speed for power saving.
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -318,6 +292,7 @@ void SystemClock_Config(void)
   }
 }
 
+// Return day of the week for a given date
 int dayOfWeek(int year, int month, int day)
 {
     if (month < 3)
@@ -330,6 +305,7 @@ int dayOfWeek(int year, int month, int day)
     return (i);
 }
 
+// Return number of days in a month
 int numberOfDaysInMonth(int year, int month)
 {
     int numberOfDaysInMonthArray[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
@@ -340,6 +316,7 @@ int numberOfDaysInMonth(int year, int month)
     return numberOfDaysInMonthArray[month - 1];
 }
 
+// Check if the date is public holiday
 bool checkPublicHoliday(int year, int month,int day){
   // check if public holiday
   bool ph= false;
@@ -354,6 +331,7 @@ bool checkPublicHoliday(int year, int month,int day){
   return ph;
 }
 
+// Draw main YEAR/Month title
 void drawMainTitle(int year,int month, int size, const GFXfont* f,int x,int y)
 {
   display.setTextColor(GxEPD_BLACK);
@@ -366,6 +344,7 @@ void drawMainTitle(int year,int month, int size, const GFXfont* f,int x,int y)
   display.print(month);
 }
 
+// Draw small YEAR/Month title
 void drawSmallTitle(int year,int month, int size, const GFXfont* f,int x,int y)
 {
   display.setTextColor(GxEPD_BLACK);
@@ -377,6 +356,8 @@ void drawSmallTitle(int year,int month, int size, const GFXfont* f,int x,int y)
   display.setCursor(x + size * 5,y+size*1.5);
   display.print(month);
 }
+
+// Draw main month calendar
 void drawMainCalendar(int year,int month, const GFXfont* fweekday,const GFXfont* fdays,int x,int y,int w, int h)
 {
 
@@ -402,16 +383,11 @@ void drawMainCalendar(int year,int month, const GFXfont* fweekday,const GFXfont*
 
   // in case of 6 week in a month, draw additional lines
   if ((dow + ndm) == 36 ) {
-    //display.drawLine(0,480,92*1,480, GxEPD_BLACK);
     display.drawLine(x,y+2*h+5*h,x+w*1,y+2*h+5*h, GxEPD_BLACK);
-    //display.drawLine(92,432,92,480, GxEPD_BLACK);
     display.drawLine(x+0*w,y,x+0*w,y+h*7, GxEPD_BLACK);
     display.drawLine(x+1*w,y,x+1*w,y+h*7, GxEPD_BLACK);
   } else if ((dow + ndm) == 37 ) {
-    //display.drawLine(0,480,92*2,480, GxEPD_BLACK);
     display.drawLine(x,y+2*h+5*h,x+w*2,y+2*h+5*h, GxEPD_BLACK);
-    //display.drawLine(92,432,92,480, GxEPD_BLACK);
-    //display.drawLine(92*2,432,92*2,480, GxEPD_BLACK);
     display.drawLine(x+0*w,y,x+0*w,y+h*7, GxEPD_BLACK);
     display.drawLine(x+1*w,y,x+1*w,y+h*7, GxEPD_BLACK);
     display.drawLine(x+2*w,y,x+2*w,y+h*7, GxEPD_BLACK);
@@ -433,8 +409,6 @@ void drawMainCalendar(int year,int month, const GFXfont* fweekday,const GFXfont*
   display.println("Fri");
   display.setCursor( x+w/4+w*6,y+h*2/3 );
   display.println("Sat");
-
-
 
   // Start draw days
   // *if today found, revent the string
@@ -464,6 +438,7 @@ void drawMainCalendar(int year,int month, const GFXfont* fweekday,const GFXfont*
   }
 }
 
+// Draw small month calendar
 void drawSmallCalendar(int year,int month, const GFXfont* fdays,int x,int y,int w, int h)
 {
 
@@ -494,20 +469,17 @@ void drawSmallCalendar(int year,int month, const GFXfont* fdays,int x,int y,int 
 
 }
 
+// Get battery voltage and draw it on the screen
 void drawBatteryvoltage(const GFXfont* fdays,int x,int y)
 {
   display.setFont(fdays);
   display.setCursor( x ,  y );
 
-  	//ADC1 channel 18 is vrefint 1.23v
-	//uint16_t vrefint = adc_read(ADC1, 17);
 	uint16_t vrefint = analogRead(AVREF);
 	//Serial.print("Vref int (1.21v):");
 	//Serial.print(vrefint);
 	//Serial.println();
 
-	//ADC1 channel 16 is temperature sensor
-	//uint16_t vtemp = adc_read(ADC1, 18);
 	uint16_t vtemp = analogRead(PA6);
   float vbat;
 	//Serial.print("PA6 value:");
@@ -522,6 +494,7 @@ void drawBatteryvoltage(const GFXfont* fdays,int x,int y)
   display.print(" V");
 }
 
+// Draw 1 month calendar with previous/next month.
 void drawcalendar()
 {
   int y,m,y1,m1,y2,m2;
@@ -562,6 +535,7 @@ void drawcalendar()
   while (display.nextPage());
 }
 
+// THis is not used.
 void drawClock(int x, int y, int size,const GFXfont* f,int hour, int minute)
 {
   //display.setRotation(r);
@@ -583,6 +557,7 @@ void drawClock(int x, int y, int size,const GFXfont* f,int hour, int minute)
   while (display.nextPage());
 }
 
+// Draw 9 month calendar
 void draw9monthcalendar()
 {
   int d,i,j,y,m,yy[3][3],mm[3][3];
@@ -618,8 +593,6 @@ void draw9monthcalendar()
     display.fillScreen(GxEPD_WHITE);
     for(i=0;i<3;i++){
       for(j=0;j<3;j++){
-        //drawSmallTitle(yy[i][j],mm[i][j],9,&FreeSansBold9pt7b,200*j+20,15+144*i);
-        //drawSmallCalendar(yy[i][j],mm[i][j],&FreeSansBold9pt7b,200*j+20,40+144*i,25,20);
         drawSmallTitle(yy[i][j],mm[i][j],9,&FreeSansBold9pt7b,200*j+20,15+160*i);
         drawSmallCalendar(yy[i][j],mm[i][j],&FreeSansBold9pt7b,200*j+20,40+160*i,25,20);
       }
@@ -629,35 +602,36 @@ void draw9monthcalendar()
 
 }
 
-
-void isr_routine() { // pin change interrupt service routine
+// pin change interrupt service routine for JJY
+void isr_routine() {
   jjy.jjy_receive();
 }
-void ticktock() {  // 10 msec interrupt service routine
+
+// 10 msec interrupt service routine for JJY
+void ticktock() {
   jjy.delta_tick();
 }
 
+// ISR for pin button push. Start JJY receive.
 void repetitionsIncrease() {
-  // This function will be called once on device wakeup
-  // You can do some little operations here (like changing variables which will be used in the loop)
-  // Remember to avoid calling delay() and long running functions since this functions executes in interrupt context
 
-  // チャタリング防止用のウエイト
+  // Wait to prevent chataling.
   delay(100);
 
-  // タイマーを開始
+  // Start timer
   MyTim->resume();
   jjy.power(true);
 
-  //受信中フラグをセット
+  // Set Receiveing flag.
   jjyreceiving = true;
-  //受信開始時間を記録する
+  // Rrcord recieving start time
   receievestarttime = millis();
 }
 
+// ISR for pin2 button push. Change calendar mode.
 void modechange() {
 
-    // チャタリング防止用のウエイト
+    // Wait to prevent chataling.
     delay(100);
 
     if(calmode == 0){
@@ -667,6 +641,8 @@ void modechange() {
     }
 
 }
+
+// Print current date and time to serial.
 void printdatetime(){
 
   time_t now = jjy.get_time();
@@ -695,12 +671,11 @@ void printdatetime(){
 
 }
 
-int curyear=0,curmonth=0,curday=0;
 
 void setup()
 {
 
-
+  // Start serial monitor.
   Serial.begin(115200);
   Serial.println();
   Serial.println("setup");
@@ -710,41 +685,41 @@ void setup()
   digitalWrite(EPDPWR,LOW);
 
   delay(100);
-#if defined(ARDUINO_ARCH_RP2040) && (defined(ARDUINO_RASPBERRY_PI_PICO) || defined(ARDUINO_RASPBERRY_PI_PICO_W))
-  // uncomment next line for use with GoodDisplay DESPI-PICO or my proto board, or Waveshare RPi boards
-  display.epd2.selectSPI(SPIn, SPISettings(4000000, MSBFIRST, SPI_MODE0));
-  // uncomment next 2 lines to allow recovery from configuration failures
-  pinMode(15, INPUT_PULLUP); // safety pin
-  while (!digitalRead(15)) delay(100); // check safety pin for fail recovery
-  // recovery can be done also by holding BOOTSEL during power-up.
-  // uncomment next line for Waveshare PhotoPainter module
-  pinMode(16, OUTPUT); digitalWrite(16, HIGH); // power to the paper
-#endif
-#if defined(ESP32) && defined(USE_HSPI_FOR_EPD)
-  hspi.begin(13, 12, 14, 15); // remap hspi for EPD (swap pins)
-  display.epd2.selectSPI(hspi, SPISettings(4000000, MSBFIRST, SPI_MODE0));
-#elif (defined(ARDUINO_ARCH_ESP32) && defined(ARDUINO_LOLIN_S2_MINI))
-  // SPI.begin(sck, miso, mosi, ss); // preset for remapped pins
-  SPI.begin(18, -1, 16, 33); // my LOLIN ESP32 S2 mini connection
-#endif
+  #if defined(ARDUINO_ARCH_RP2040) && (defined(ARDUINO_RASPBERRY_PI_PICO) || defined(ARDUINO_RASPBERRY_PI_PICO_W))
+    // uncomment next line for use with GoodDisplay DESPI-PICO or my proto board, or Waveshare RPi boards
+    display.epd2.selectSPI(SPIn, SPISettings(4000000, MSBFIRST, SPI_MODE0));
+    // uncomment next 2 lines to allow recovery from configuration failures
+    pinMode(15, INPUT_PULLUP); // safety pin
+    while (!digitalRead(15)) delay(100); // check safety pin for fail recovery
+    // recovery can be done also by holding BOOTSEL during power-up.
+    // uncomment next line for Waveshare PhotoPainter module
+    pinMode(16, OUTPUT); digitalWrite(16, HIGH); // power to the paper
+  #endif
+  #if defined(ESP32) && defined(USE_HSPI_FOR_EPD)
+    hspi.begin(13, 12, 14, 15); // remap hspi for EPD (swap pins)
+    display.epd2.selectSPI(hspi, SPISettings(4000000, MSBFIRST, SPI_MODE0));
+  #elif (defined(ARDUINO_ARCH_ESP32) && defined(ARDUINO_LOLIN_S2_MINI))
+    // SPI.begin(sck, miso, mosi, ss); // preset for remapped pins
+    SPI.begin(18, -1, 16, 33); // my LOLIN ESP32 S2 mini connection
+  #endif
 
-#if defined(ESP32) && defined(_GxBitmaps1304x984_H_)
-  drawBitmaps1304x984();
-  display.powerOff();
-#endif
+  #if defined(ESP32) && defined(_GxBitmaps1304x984_H_)
+    drawBitmaps1304x984();
+    display.powerOff();
+  #endif
+
   Serial.println("setup done");
-  //display.end();
 
+  // Initialize RTC
   rtc.setClockSource(STM32RTC::LSE_CLOCK);
   rtc.begin(); // initialize RTC 24H format
+  // Check it RTC time is not set.
   if (!rtc.isTimeSet()) {
     Serial.printf("RTC time not set\n Set it.\n");
-    // Set the time
+    // RTC time is not set, maybe powerloss, so Set the date and time
     rtc.setHours(hours);
     rtc.setMinutes(minutes);
     rtc.setSeconds(seconds);
-
-    // Set the date
     rtc.setWeekDay(weekDay);
     rtc.setDay(day);
     rtc.setMonth(month);
@@ -759,15 +734,13 @@ void setup()
   pinMode(pin, INPUT_PULLUP);
   pinMode(pin2, INPUT_PULLUP);
 
-  // Initialize User button pin.
+  // Initialize LED pin for JJY status
   pinMode(GLED, OUTPUT);
   pinMode(RLED, OUTPUT);
   digitalWrite( GLED, LOW );
   digitalWrite( RLED, LOW );
 
-  // Attach a wakeup interrupt on pin, calling repetitionsIncrease when the device is woken up
-  // Last parameter (LowPowerMode) should match with the low power state used: in this example LowPower.sleep()
-  // this is for user button event.
+  // Attache ISR, these are for user button event.
   LowPower.attachInterruptWakeup(pin, repetitionsIncrease, RISING, DEEP_SLEEP_MODE);
   LowPower.attachInterruptWakeup(pin2, modechange, RISING, DEEP_SLEEP_MODE);
 
@@ -776,23 +749,20 @@ void setup()
   MyTim->attachInterrupt(ticktock);
   MyTim->pause();
 
-
-  // JJY Library
+  // JJY Library initialize
   jjy.begin(); // Start JJY Receive
   jjy.freq(40); // Carrier frequency setting. Default:40
 
   Serial.println("JJY Initialized.");
-  //jjy.jjy_receive();
-  //while(jjy.getTime() == -1); // 受信が終わるまで次を実行させない場合に書く
 
-  // Turn off JJY module power.s
+  // Turn off JJY module power to save power.
   jjy.power(false);
 
-    // DATA pin signal change edge detection. (Mandatory)
+  // DATA pin signal change edge detection. (Mandatory)
   // For JJY data input.
   attachInterrupt(digitalPinToInterrupt(DATA), isr_routine, CHANGE);
 
-  // to check vcc voltge
+  // ADC initialize to check vcc voltge
   pinMode(PA6, INPUT_ANALOG);
 
 
@@ -800,14 +770,10 @@ void setup()
 
 void loop()
 {
-    // Print date...
-  //Serial.printf("%02d/%02d/%02d ", rtc.getDay(), rtc.getMonth(), rtc.getYear());
-
-  // ...and time
-  //Serial.printf("%02d:%02d:%02d.%03d\n", rtc.getHours(), rtc.getMinutes(), rtc.getSeconds(), rtc.getSubSeconds());
-
+  // Check if the date is changed.
   if ( (curyear != rtc.getYear()) or (curmonth != rtc.getMonth()) or (curday != rtc.getDay()) )
   {
+    // if changed, draw calendar.
     curyear = rtc.getYear();
     curmonth = rtc.getMonth();
     curday = rtc.getDay();
@@ -816,21 +782,23 @@ void loop()
     digitalWrite(EPDPWR,HIGH);
     delay(100);
 
+    // Before changing clock, serial needs to be disabled.
     Serial.end();
+    // Change clock speed to default value.
     SystemClock_Config_org();
+    // Serial needs to be initialized again.
     Serial.begin(115200);
 
     display.init(115200, true, 2, false); // USE THIS for Waveshare boards with "clever" reset circuit, 2ms reset pulse
     drawcalendar();
-
     display.hibernate();
 
     // power off e-paper
     digitalWrite(EPDPWR,LOW);
 
-  // これをいれたら消費電流は激減　ほぼ0マイクロになった
-  // https://www.yza.jp/blog/2009/11/stm32_stop_mode_leak_power/
     delay(100);
+
+    // to reduce the power consumption, set pins to input mode.
     pinMode(PA4,INPUT);
     pinMode(PA5,INPUT);
     pinMode(PA6,INPUT);
@@ -839,11 +807,15 @@ void loop()
     pinMode(PB0,INPUT);
     pinMode(PB1,INPUT);
 
+    // Before changing clock, serial needs to be disabled.
     Serial.end();
+    // Change clock speed for power saving.
     SystemClock_Config();
+    // Serial needs to be initialized again.
     Serial.begin(115200);
   }
 
+  // Check if the calendar mode is changed.
   if (currentcalmode != calmode) {
     currentcalmode = calmode;
 
@@ -857,7 +829,7 @@ void loop()
     Serial.begin(115200);
 
     display.init(115200, true, 2, false); // USE THIS for Waveshare boards with "clever" reset circuit, 2ms reset pulse
-    if (calmode ==0) {
+    if (calmode == 0) {
       drawcalendar();
     } else {
       draw9monthcalendar();
@@ -867,9 +839,9 @@ void loop()
     // power off e-paper
     digitalWrite(EPDPWR,LOW);
 
-  // これをいれたら消費電流は激減　ほぼ0マイクロになった
-  // https://www.yza.jp/blog/2009/11/stm32_stop_mode_leak_power/
     delay(100);
+
+    // to reduce the power consumption, set pins to input mode.
     pinMode(PA4,INPUT);
     pinMode(PA5,INPUT);
     pinMode(PA6,INPUT);
@@ -883,18 +855,23 @@ void loop()
     Serial.begin(115200);
   }
 
+  // To save power, will enter into deep sleep mode for 10s.
   LowPower.deepSleep(10000);
   //delay(1000);
 
+  // If JJY flag is set, then start receiving JJY signal.
   if (jjyreceiving) {
     time_t lastreceived = jjy.getTime();
     unsigned long cycletime = millis();
     int loopcount = 0;
-    //受信成功またはタイムアウト時間まで待つ
+    // Wait until receive success or time out
     while ((lastreceived == -1) and ((millis() - receievestarttime) < JJYTIMEOUT)) {
-      //-1の間は受信中
+      // if it is -1, meaning JJY receving.
 
-      //1秒毎に受信品質をLEDで表現する
+      // Show JJY receiveing quality as LED.
+      // Green  >= 60%
+      // Yeallow 30 - 60 %
+      // Red   <=30%
 
       if (millis() - cycletime > 1000) {
 
@@ -921,12 +898,12 @@ void loop()
         digitalWrite( GLED, LOW );
         digitalWrite( RLED, LOW );
       }
-      //LowPower.sleep(1000);
+
       lastreceived = jjy.getTime();
 
     }
     if (lastreceived != -1){
-      //受信が終わったので日時をRTCにセットする。
+      // If receive successful, set date time to RTC.
       time_t now = jjy.get_time();
       tm tm_info;
       localtime_r(&now, &tm_info);
@@ -937,10 +914,10 @@ void loop()
       else { wdayforrtc = tm_info.tm_wday; }
       rtc.setDate(wdayforrtc, tm_info.tm_mday, tm_info.tm_mon + 1, tm_info.tm_year + 1900 - 2000);
 
-      //受信が終わったので日時を表示する。
+      // Print date/time to serial
       printdatetime();
 
-      // LEDでも受信成功を知らせる
+      // LED flash Green to show the success.
       digitalWrite( GLED, HIGH );
       delay(100);
       digitalWrite( GLED, LOW );
@@ -954,7 +931,7 @@ void loop()
       digitalWrite( GLED, LOW );
       delay(500);
     } else {
-      // LEDでも受信失敗を知らせる
+      // LED flash Red to show the failure.
       Serial.println("Timed Out");
       digitalWrite( RLED, HIGH );
       delay(100);
@@ -971,11 +948,11 @@ void loop()
 
     }
 
-    //タイマーを停止
+    // Stop the timer
     MyTim->pause();
-    // 受信中フラグをクリア
+    // Clear receiving flag.
     jjyreceiving = false;
-    // JJYの電源をOFF
+    // Power off JJY module.
     jjy.power(false);
   }
 
