@@ -31,8 +31,8 @@ int curyear=0,curmonth=0,curday=0;
 #define SEL PB5
 
 // define pin for JJY status LED
-#define GLED PA8
-#define RLED PA9
+#define GLED PA9
+#define RLED PA8
 
 // TIMEout for JJY recieve (ms)
 #define JJYTIMEOUT 300000
@@ -813,6 +813,8 @@ void loop()
     SystemClock_Config();
     // Serial needs to be initialized again.
     Serial.begin(115200);
+    // Set clock source to LSE.
+    rtc.setClockSource(STM32RTC::LSE_CLOCK);
   }
 
   // Check if the calendar mode is changed.
@@ -853,6 +855,7 @@ void loop()
     Serial.end();
     SystemClock_Config();
     Serial.begin(115200);
+    rtc.setClockSource(STM32RTC::LSE_CLOCK);
   }
 
   // To save power, will enter into deep sleep mode for 10s.
